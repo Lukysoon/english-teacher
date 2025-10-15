@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
 
 class Question {
   constructor(id, question, answer) {
@@ -12,26 +13,116 @@ const App = () => {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1);
   const [userAnswers, setUserAnswers] = useState({});
   const [showResults, setShowResults] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [conversation, setConversation] = useState([]);
 
-  const questions = [
-    new Question(1, "Co Sarah dělala včera?", "sledovala film"),
-    new Question(2, "Kam šla Sarah s přáteli?", "do kina v centru"),
-    new Question(3, "Jaký typ filmu Sarah sledovala?", "romantickou komedii"),
-    new Question(4, "Jak se Sarah cítila ohledně filmu?", "velmi dobrý"),
-    new Question(5, "V kolik hodin Sarah skončila sledování filmu?", "v 8 hodin"),
-    new Question(6, "Kde přesně bylo kino?", "centrum města")
-  ];
+  // Fetch exercise from API on component mount
+  useEffect(() => {
+    const fetchExercise = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-  const conversation = [
-    { role: 'Jan', text: 'Ahoj, Sarah! Co jsi dělala včera?' },
-    { role: 'Sarah', text: 'Ahoj, Jane! Sledovala jsem film. Šla jsem do kina s přáteli.' },
-    { role: 'Jan', text: 'Kam jste šli s přáteli?' },
-    { role: 'Sarah', text: 'Šli jsme do kina v centru města.' },
-    { role: 'Jan', text: 'Jaký film jste sledovali?' },
-    { role: 'Sarah', text: 'Sledovali jsme romantickou komedii. Byl to opravdu dobrý film.' },
-    { role: 'Jan', text: 'Kdy jste skončili sledování filmu?' },
-    { role: 'Sarah', text: 'Skončili jsme sledování filmu v 8 hodin večer.' }
-  ];
+        const response = await fetch('http://localhost:8000/api/v1/exercises/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            topic: 'daily activities',
+            level: 'A1',
+            language_mechanism: 'past simple'
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Parse the exercise text
+        parseExercise(data.exercise);
+
+      } catch (err) {
+        console.error('Error fetching exercise:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchExercise();
+  }, []);
+
+  // Parse the exercise text into conversation and questions
+  const parseExercise = (exerciseText) => {
+    try {
+      const parsedConversation = [];
+      const parsedQuestions = [];
+      const parsedAnswers = [];
+      var blocks = []
+      // Extract all #### blocks
+      blocks = exerciseText.split("####").filter(block => block.trim());
+      console.log(blocks)
+      // console.log(exerciseText)
+      if (blocks && blocks.length === 3) {
+        // First #### block contains the conversation
+        const conversationBlock = blocks[0]
+        const conversationLines = conversationBlock.split('<br>').map(line => line.trim()).filter(line => line);
+
+        conversationLines.forEach(line => {
+          // Check if it's a dialogue line (format: **Name:** text)
+          const dialogueMatch = line.match(/\*\*(.+?)\*\*:\s*(.+)/);
+          if (dialogueMatch) {
+            parsedConversation.push({
+              role: dialogueMatch[1],
+              text: dialogueMatch[2]
+            });
+          }
+        });
+
+        // Second #### block contains the questions
+        const questionsBlock = blocks[1]
+        const questionLines = questionsBlock.split('<br>').map(line => line.trim()).filter(line => line);
+
+        questionLines.forEach(line => {
+          // Match pattern: 1. question or 1. question text
+          const questionMatch = line.match(/^(\d+)\.\s*(.+)/);
+          if (questionMatch) {
+            parsedQuestions.push(new Question(
+              parseInt(questionMatch[1]),
+              questionMatch[2].trim(),
+              '' // We don't have answers yet - they'll be evaluated by the backend
+            ));
+          }
+        });
+
+        // Third #### block contains the questions
+        const answersBlock = blocks[2];
+        const answerLines = answersBlock.split('<br>').map(line => line.trim()).filter(line => line);
+
+        answerLines.forEach((line, index) => {
+          // Match pattern: 1. question or 1. question text
+          const answerMatch = line.match(/^(\d+)\.\s*(.+)/);
+          if (answerMatch && parsedAnswers[index]) {
+            parsedAnswers[index].answer = "odpoved";
+          }
+        });
+      } else {
+        console.error("Could not find expected #### blocks in exercise text");
+        setError('Invalid exercise format');
+      }
+
+      setConversation(parsedConversation);
+      setQuestions(parsedQuestions);
+    } catch (err) {
+      console.error('Error parsing exercise:', err);
+      setError('Failed to parse exercise');
+    }
+  };
 
   const handleAnswerChange = (e) => {
     setUserAnswers({
@@ -72,11 +163,104 @@ const App = () => {
     setShowResults(true);
   };
 
-  const restart = () => {
+  const restart = async () => {
     setUserAnswers({});
     setCurrentQuestionIndex(1);
     setShowResults(false);
+
+    // Fetch a new exercise
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch('http://localhost:8000/exercises/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          topic: 'daily activities',
+          level: 'A1',
+          language_mechanism: 'past simple'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      parseExercise(data.exercise);
+
+    } catch (err) {
+      console.error('Error fetching exercise:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div style={{ backgroundColor: '#f8f9fa', minHeight: '100vh', padding: '30px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: '3rem',
+            color: '#007bff',
+            marginBottom: '20px',
+            animation: 'spin 1s linear infinite'
+          }}>
+            ⟳
+          </div>
+          <p style={{ fontSize: '1.5rem', color: '#2c3e50' }}>Loading exercise...</p>
+          <style>{`
+            @keyframes spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div style={{ backgroundColor: '#f8f9fa', minHeight: '100vh', padding: '30px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{
+          backgroundColor: 'white',
+          padding: '40px',
+          borderRadius: '15px',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          textAlign: 'center',
+          maxWidth: '600px'
+        }}>
+          <div style={{ fontSize: '4rem', marginBottom: '20px' }}>⚠️</div>
+          <h2 style={{ fontSize: '2rem', color: '#dc3545', marginBottom: '20px' }}>Error Loading Exercise</h2>
+          <p style={{ fontSize: '1.3rem', color: '#2c3e50', marginBottom: '30px' }}>{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '15px 30px',
+              fontSize: '1.3rem',
+              fontWeight: 'bold',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '10px',
+              cursor: 'pointer'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#0056b3'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#007bff'}
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (showResults) {
     const score = getScore();
